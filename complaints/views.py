@@ -61,7 +61,6 @@ class ComplaintViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, Retriev
     search_fields = ['ticket_id', 'room_number', 'bed_number', 'description']
     ordering_fields = ['submitted_at', 'priority', 'status']
     ordering = ['-submitted_at']  # default ordering
-    pagination_class = CustomLimitOffsetPagination
     
     def get_serializer_class(self):
         if self.action == 'create':
