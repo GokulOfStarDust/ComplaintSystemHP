@@ -132,7 +132,7 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
     queryset = Complaint.objects.all()
     serializer_class = ReportDepartment
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['assigned_department', 'priority', 'status']
+    filterset_fields = ['assigned_department', 'priority', 'status', 'submitted_at']
 
     @action(detail=False, methods=['get'])
     def department_priority_stats(self, request):
@@ -171,12 +171,51 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
 
     @action(detail=False, methods=['get'])
     def all_department_stats(self, request):
+        # Get filter parameters
+        priority = request.query_params.get('priority')
+        department = request.query_params.get('department')
+        status = request.query_params.get('status')
+        submitted_at = request.query_params.get('submitted_at')
+
+        # Start with base queryset
+        queryset = self.queryset
+
+        # Apply filters if provided
+        if priority:
+            if priority not in dict(Complaint.PRIORITY_CHOICES):
+                return Response(
+                    {'error': 'Invalid priority value'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            queryset = queryset.filter(priority=priority)
+
+        if department:
+            queryset = queryset.filter(assigned_department=department)
+
+        if status:
+            queryset = queryset.filter(status=status)
+
+        if submitted_at:
+            queryset = queryset.filter(submitted_at__date=submitted_at)
+
         # Get all combinations of department and priority with their counts
-        stats = self.queryset.values('assigned_department', 'priority').annotate(
+        stats = queryset.values('assigned_department', 'priority').annotate(
             open_tickets=Count('ticket_id', filter=Q(status='open')),
             resolved_tickets=Count('ticket_id', filter=Q(status='resolved')),
             total_tickets=Count('ticket_id')
         ).order_by('assigned_department', 'priority')
+
+        # If no results found
+        if not stats:
+            return Response({
+                'message': 'No data found for the specified filters',
+                'filters_applied': {
+                    'priority': priority,
+                    'department': department,
+                    'status': status,
+                    'submitted_at': submitted_at
+                }
+            })
 
         return Response(stats)
 
