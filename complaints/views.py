@@ -7,8 +7,9 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework.mixins import ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin,DestroyModelMixin
 from django_filters.rest_framework import DjangoFilterBackend
 from .models import Room, Complaint, Department, Issue_Category
-from .serializers import RoomSerializer, ComplaintSerializer, ComplaintCreateSerializer, ComplaintUpdateSerializer, DepartmentSerializer,IssueCatSerializer
+from .serializers import RoomSerializer, ComplaintSerializer, ComplaintCreateSerializer, ComplaintUpdateSerializer, DepartmentSerializer,IssueCatSerializer,ReportDepartment
 from .pagination import CustomLimitOffsetPagination
+from django.db.models import Count, Q
 
 # Create your views here.
 class RoomViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin,DestroyModelMixin):
@@ -124,3 +125,60 @@ class ComplaintViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, Retriev
         complaints = self.queryset.filter(priority=priority_filter)
         serializer = self.get_serializer(complaints, many=True)
         return Response(serializer.data)
+
+class ReportViewSet(GenericViewSet, ListModelMixin):
+    queryset = Complaint.objects.all()
+    serializer_class = ReportDepartment
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['assigned_department', 'priority', 'status']
+
+    @action(detail=False, methods=['get'])
+    def department_priority_stats(self, request):
+        # Get department and priority from query params
+        department = request.query_params.get('department')
+        priority = request.query_params.get('priority')
+
+        if not department or not priority:
+            return Response(
+                {'error': 'Both department and priority parameters are required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate priority
+        if priority not in dict(Complaint.PRIORITY_CHOICES):
+            return Response(
+                {'error': 'Invalid priority value'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get counts for the specific department and priority
+        stats = self.queryset.filter(
+            assigned_department=department,
+            priority=priority
+        ).aggregate(
+            open_tickets=Count('ticket_id', filter=Q(status='open')),
+            resolved_tickets=Count('ticket_id', filter=Q(status='resolved')),
+            total_tickets=Count('ticket_id')
+        )
+
+        # Add department and priority to the response
+        stats['department'] = department
+        stats['priority'] = priority
+
+        return Response(stats)
+
+    @action(detail=False, methods=['get'])
+    def all_department_stats(self, request):
+        # Get all combinations of department and priority with their counts
+        stats = self.queryset.values('assigned_department', 'priority').annotate(
+            open_tickets=Count('ticket_id', filter=Q(status='open')),
+            resolved_tickets=Count('ticket_id', filter=Q(status='resolved')),
+            total_tickets=Count('ticket_id')
+        ).order_by('assigned_department', 'priority')
+
+        return Response(stats)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        # You can add additional filtering or aggregation here if needed
+        return queryset

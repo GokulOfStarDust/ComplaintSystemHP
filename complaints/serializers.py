@@ -151,8 +151,20 @@ class ComplaintCreateSerializer(serializers.ModelSerializer):
         return complaint
 
     def validate(self, data):
-        # Perform existing room validation first
-        # Only validate room if room-related fields are being updated
+        # Get the issue type from the data
+        issue_type = data.get('issue_type')
+        
+        # Find the corresponding issue category and get its department
+        try:
+            issue_category = Issue_Category.objects.get(issue_category_name=issue_type, status='active')
+            # Set the assigned department automatically
+            data['assigned_department'] = issue_category.department.department_name
+        except Issue_Category.DoesNotExist:
+            raise serializers.ValidationError({
+                'issue_type': 'Invalid or inactive issue category. Please select a valid issue category.'
+            })
+
+        # Perform existing room validation
         if any(field in data for field in ['bed_number', 'room_number', 'block', 'floor', 'ward', 'speciality', 'room_type']):
             try:
                 room = Room.objects.get(
@@ -187,31 +199,22 @@ class ComplaintCreateSerializer(serializers.ModelSerializer):
         elif not qr_data_from_qr and not qr_signature_from_qr and self.context['request'].method == 'POST':
             # If it's a POST request and QR data/signature are missing, it means
             # the request is not coming from a QR scan, so we don't apply this validation.
-            pass # Allow requests without QR data/signature
+            pass  # Allow requests without QR data/signature
         else:
-             raise serializers.ValidationError({'qr_code': 'QR data or signature missing for QR-based complaint submission.'})
+            raise serializers.ValidationError({'qr_code': 'QR data or signature missing for QR-based complaint submission.'})
 
         # New validation: Prevent duplicate open/in-progress complaints for the same issue in the same room
-        issue_type = data.get('issue_type')
-        bed_number = data.get('bed_number')
-        room_number = data.get('room_number')
-        block = data.get('block')
-        floor = data.get('floor')
-        ward = data.get('ward')
-        speciality = data.get('speciality')
-        room_type = data.get('room_type')
-
-        if issue_type and bed_number and room_number and block and floor and ward and speciality and room_type:
+        if issue_type and all(field in data for field in ['bed_number', 'room_number', 'block', 'floor', 'ward', 'speciality', 'room_type']):
             existing_complaint = Complaint.objects.filter(
                 issue_type=issue_type,
-                bed_number=bed_number,
-                room_number=room_number,
-                block=block,
-                floor=floor,
-                ward=ward,
-                speciality=speciality,
-                room_type=room_type,
-                status__in=['open', 'in_progress'] # Check for open or in-progress status
+                bed_number=data['bed_number'],
+                room_number=data['room_number'],
+                block=data['block'],
+                floor=data['floor'],
+                ward=data['ward'],
+                speciality=data['speciality'],
+                room_type=data['room_type'],
+                status__in=['open', 'in_progress']  # Check for open or in-progress status
             ).exists()
 
             if existing_complaint:
@@ -281,3 +284,8 @@ class ComplaintImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ComplaintImage
         fields = ['image']
+
+class ReportDepartment(serializers.ModelSerializer):
+    class Meta:
+        model = Complaint
+        fields = ['ticket_id', 'assigned_department', 'priority', 'status', 'submitted_at', 'issue_type', 'room_number', 'ward']
