@@ -12,11 +12,13 @@ from .pagination import CustomLimitOffsetPagination
 from django.db.models import Count, Q
 from django.db.models import Avg, F, ExpressionWrapper, DurationField
 from datetime import timedelta
+from dateutil.parser import parse
 
 # Create your views here.
 class RoomViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin,DestroyModelMixin):
     queryset = Room.objects.all()
     serializer_class = RoomSerializer
+    pagination_class = CustomLimitOffsetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['status', 'ward', 'speciality', 'room_type']
     search_fields = ['room_no', 'bed_no', 'Block']
@@ -40,6 +42,7 @@ class RoomViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, RetrieveMode
 class DepartmentViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin, DestroyModelMixin):
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
+    pagination_class = CustomLimitOffsetPagination
     lookup_field = 'department_code'
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['department_name','status']
@@ -48,6 +51,7 @@ class DepartmentViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, Retrie
 class IssueCatViewset(GenericViewSet, ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin, DestroyModelMixin):
     queryset = Issue_Category.objects.all()
     serializer_class = IssueCatSerializer
+    pagination_class = CustomLimitOffsetPagination
     lookup_field = 'issue_category_code'
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['issue_category_code', 'department', 'issue_category_name', 'status']
@@ -56,6 +60,7 @@ class IssueCatViewset(GenericViewSet, ListModelMixin, CreateModelMixin, Retrieve
 class ComplaintViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin, DestroyModelMixin):
     queryset = Complaint.objects.all().order_by('-submitted_at')
     lookup_field = 'ticket_id'
+    pagination_class = CustomLimitOffsetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'priority', 'issue_type', 'ward', 'block']
     search_fields = ['ticket_id', 'room_number', 'bed_number', 'description']
@@ -130,6 +135,7 @@ class ComplaintViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, Retriev
 class ReportViewSet(GenericViewSet, ListModelMixin):
     queryset = Complaint.objects.all()
     serializer_class = ReportDepartment
+    pagination_class = CustomLimitOffsetPagination
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['assigned_department', 'priority', 'status', 'submitted_at']
 
@@ -204,8 +210,8 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
             total_tickets=Count('ticket_id')
         ).order_by('assigned_department', 'priority')
 
-        # If no results found
-        if not stats:
+        # If no results found before pagination, return empty response with message
+        if not stats.exists():
             return Response({
                 'message': 'No data found for the specified filters',
                 'filters_applied': {
@@ -214,8 +220,16 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
                     'status': status,
                     'submitted_at': submitted_at
                 }
-            })
+            }, status=status.HTTP_200_OK)
 
+        # Paginate the results
+        page = self.paginate_queryset(stats)
+        if page is not None:
+            # The stats are already in the desired dictionary format due to .values() and .annotate()
+            # No need to serialize further. Just return the paginated response.
+            return self.get_paginated_response(list(page)) # Convert to list to ensure it's iterable
+
+        # Fallback for when pagination is not applied (shouldn't happen with pagination_class set)
         return Response(stats)
 
     def get_queryset(self):
@@ -226,13 +240,92 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
 class TATViewSet(GenericViewSet, ListModelMixin):
     queryset = Complaint.objects.all()
     serializer_class = TATserializer
+    pagination_class = CustomLimitOffsetPagination
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['submitted_at','resolved_at','ticket_id', 'priority', 'status']
+    filterset_fields = ['priority', 'status']
 
     @action(detail=False, methods=['get'])
     def all_department_TATS(self, request):
+        # Get filter parameters
+        priority = request.query_params.get('priority')
+        date = request.query_params.get('date')  # Format: YYYY-MM-DD
+        start_time = request.query_params.get('start_time')  # Format: HH:MM (24-hour)
+        end_time = request.query_params.get('end_time')  # Format: HH:MM (24-hour)
+
+        # Start with base queryset
+        queryset = self.queryset
+
+        # Apply priority filter if provided
+        if priority:
+            if priority not in dict(Complaint.PRIORITY_CHOICES):
+                return Response(
+                    {'error': 'Invalid priority value'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            queryset = queryset.filter(priority=priority)
+
+        # Handle date and time filtering
+        try:
+            if date:
+                # Parse the date
+                parsed_date = parse(date)
+                if not parsed_date:
+                    raise ValueError("Invalid date format")
+
+                # If time range is provided
+                if start_time or end_time:
+                    # Validate time format
+                    if start_time:
+                        try:
+                            # Parse start time
+                            start_hour, start_minute = map(int, start_time.split(':'))
+                            if not (0 <= start_hour <= 23 and 0 <= start_minute <= 59):
+                                raise ValueError("Invalid time format")
+                            start_datetime = parsed_date.replace(hour=start_hour, minute=start_minute)
+                        except ValueError:
+                            raise ValueError("Invalid start time format. Use HH:MM (24-hour)")
+                    else:
+                        # If no start time, use start of day
+                        start_datetime = parsed_date.replace(hour=0, minute=0)
+
+                    if end_time:
+                        try:
+                            # Parse end time
+                            end_hour, end_minute = map(int, end_time.split(':'))
+                            if not (0 <= end_hour <= 23 and 0 <= end_minute <= 59):
+                                raise ValueError("Invalid time format")
+                            end_datetime = parsed_date.replace(hour=end_hour, minute=end_minute)
+                        except ValueError:
+                            raise ValueError("Invalid end time format. Use HH:MM (24-hour)")
+                    else:
+                        # If no end time, use end of day
+                        end_datetime = parsed_date.replace(hour=23, minute=59)
+
+                    # Apply datetime range filter
+                    queryset = queryset.filter(
+                        submitted_at__gte=start_datetime,
+                        submitted_at__lte=end_datetime
+                    )
+                else:
+                    # If no time range, filter for the entire day
+                    queryset = queryset.filter(submitted_at__date=parsed_date)
+
+        except ValueError as e:
+            return Response({
+                'error': str(e),
+                'message': 'Please use the following formats:',
+                'example': {
+                    'date_only': '/api/tat/all_department_TATS/?date=2025-06-16',
+                    'with_time_range': '/api/tat/all_department_TATS/?date=2025-06-16&start_time=09:00&end_time=17:00'
+                },
+                'format_guide': {
+                    'date': 'YYYY-MM-DD (e.g., 2025-06-16)',
+                    'time': 'HH:MM in 24-hour format (e.g., 09:00, 17:30)'
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Calculate TAT for resolved tickets
-        resolved_tickets = self.queryset.filter(
+        resolved_tickets = queryset.filter(
             status='resolved',
             resolved_at__isnull=False
         ).annotate(
@@ -243,30 +336,67 @@ class TATViewSet(GenericViewSet, ListModelMixin):
         )
 
         # Get total tickets count
-        total_tickets = self.queryset.count()
+        total_tickets = queryset.count()
         
         # Calculate average TAT for resolved tickets
         avg_tat = resolved_tickets.aggregate(
             avg_tat=Avg('tat')
         )['avg_tat']
 
-        # Format the response data
-        response_data = {
-            'total_tickets': total_tickets,
-            'average_tat': str(avg_tat) if avg_tat else '-',
-            'tickets': []
-        }
-
         # Add individual ticket TATs
-        for ticket in self.queryset:
-            ticket_data = {
-                'ticket_id': ticket.ticket_id,
-                'submitted_at': ticket.submitted_at,
-                'resolved_at': ticket.resolved_at,
-                'priority': ticket.priority,
-                'status': ticket.status,
-                'tat': str(ticket.resolved_at - ticket.submitted_at) if ticket.status == 'resolved' and ticket.resolved_at else '-'
-            }
-            response_data['tickets'].append(ticket_data)
+        # for ticket in queryset:
+        #     ticket_data = {
+        #         'ticket_id': ticket.ticket_id,
+        #         'submitted_at': ticket.submitted_at,
+        #         'resolved_at': ticket.resolved_at,
+        #         'priority': ticket.priority,
+        #         'status': ticket.status,
+        #         'tat': str(ticket.resolved_at - ticket.submitted_at) if ticket.status == 'resolved' and ticket.resolved_at else '-'
+        #     }
+        #     response_data['tickets'].append(ticket_data)
 
-        return Response(response_data)
+        # Paginate the queryset for the 'tickets' list
+        page = self.paginate_queryset(queryset)
+
+        if page is not None:
+            # Serialize the paginated data
+            serializer = self.get_serializer(page, many=True)
+            paginated_tickets_data = serializer.data
+
+            # Get pagination links and count from self.paginator
+            paginator = self.paginator
+            count = paginator.count
+            next_link = paginator.get_next_link()
+            previous_link = paginator.get_previous_link()
+
+            response_data = {
+                'total_tickets': total_tickets,
+                'average_tat': str(avg_tat) if avg_tat else '-',
+                'filters_applied': {
+                    'priority': priority,
+                    'date': date,
+                    'start_time': start_time,
+                    'end_time': end_time
+                },
+                'count': count,
+                'next': next_link,
+                'previous': previous_link,
+                'results': paginated_tickets_data
+            }
+            return Response(response_data)
+        else:
+            # Fallback if pagination is not applied (should ideally not be reached if pagination_class is set).
+            # In this case, just return the unpaginated results along with aggregations.
+            serializer = self.get_serializer(queryset, many=True)
+            response_data = {
+                'total_tickets': total_tickets,
+                'average_tat': str(avg_tat) if avg_tat else '-',
+                'filters_applied': {
+                    'priority': priority,
+                    'date': date,
+                    'start_time': start_time,
+                    'end_time': end_time
+                },
+                'results': serializer.data  # Unpaginated results
+            }
+            return Response(response_data)
