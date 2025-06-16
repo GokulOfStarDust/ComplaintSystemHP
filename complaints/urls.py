@@ -10,6 +10,7 @@ router.register(r'complaints', views.ComplaintViewSet)
 router.register(r'report',views.ReportViewSet)
 router.register(r'departments', views.DepartmentViewSet)
 router.register(r'issue-category', views.IssueCatViewset)
+router.register(r'TATView', views.TATViewSet)
 
 urlpatterns = [
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),

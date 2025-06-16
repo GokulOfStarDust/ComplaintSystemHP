@@ -289,3 +289,7 @@ class ReportDepartment(serializers.ModelSerializer):
     class Meta:
         model = Complaint
         fields = ['ticket_id', 'assigned_department', 'priority', 'status', 'submitted_at', 'issue_type', 'room_number', 'ward']
+class TATserializer(serializers.ModelSerializer):
+    class Meta:
+        model = Complaint
+        fields = ['ticket_id','submitted_at','resolved_at','priority','status']

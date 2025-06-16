@@ -7,9 +7,11 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework.mixins import ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin,DestroyModelMixin
 from django_filters.rest_framework import DjangoFilterBackend
 from .models import Room, Complaint, Department, Issue_Category
-from .serializers import RoomSerializer, ComplaintSerializer, ComplaintCreateSerializer, ComplaintUpdateSerializer, DepartmentSerializer,IssueCatSerializer,ReportDepartment
+from .serializers import RoomSerializer, ComplaintSerializer, ComplaintCreateSerializer, ComplaintUpdateSerializer, DepartmentSerializer,IssueCatSerializer,ReportDepartment,TATserializer
 from .pagination import CustomLimitOffsetPagination
 from django.db.models import Count, Q
+from django.db.models import Avg, F, ExpressionWrapper, DurationField
+from datetime import timedelta
 
 # Create your views here.
 class RoomViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin,DestroyModelMixin):
@@ -182,3 +184,51 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
         queryset = super().get_queryset()
         # You can add additional filtering or aggregation here if needed
         return queryset
+    
+class TATViewSet(GenericViewSet, ListModelMixin):
+    queryset = Complaint.objects.all()
+    serializer_class = TATserializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['submitted_at','resolved_at','ticket_id', 'priority', 'status']
+
+    @action(detail=False, methods=['get'])
+    def all_department_TATS(self, request):
+        # Calculate TAT for resolved tickets
+        resolved_tickets = self.queryset.filter(
+            status='resolved',
+            resolved_at__isnull=False
+        ).annotate(
+            tat=ExpressionWrapper(
+                F('resolved_at') - F('submitted_at'),
+                output_field=DurationField()
+            )
+        )
+
+        # Get total tickets count
+        total_tickets = self.queryset.count()
+        
+        # Calculate average TAT for resolved tickets
+        avg_tat = resolved_tickets.aggregate(
+            avg_tat=Avg('tat')
+        )['avg_tat']
+
+        # Format the response data
+        response_data = {
+            'total_tickets': total_tickets,
+            'average_tat': str(avg_tat) if avg_tat else '-',
+            'tickets': []
+        }
+
+        # Add individual ticket TATs
+        for ticket in self.queryset:
+            ticket_data = {
+                'ticket_id': ticket.ticket_id,
+                'submitted_at': ticket.submitted_at,
+                'resolved_at': ticket.resolved_at,
+                'priority': ticket.priority,
+                'status': ticket.status,
+                'tat': str(ticket.resolved_at - ticket.submitted_at) if ticket.status == 'resolved' and ticket.resolved_at else '-'
+            }
+            response_data['tickets'].append(ticket_data)
+
+        return Response(response_data)
