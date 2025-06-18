@@ -11,7 +11,7 @@ from .serializers import RoomSerializer, ComplaintSerializer, ComplaintCreateSer
 from .pagination import CustomLimitOffsetPagination
 from django.db.models import Count, Q
 from django.db.models import Avg, F, ExpressionWrapper, DurationField
-from datetime import timedelta
+from datetime import timedelta, time
 from dateutil.parser import parse
 
 # Create your views here.
@@ -309,7 +309,22 @@ class TATViewSet(GenericViewSet, ListModelMixin):
                 else:
                     # If no time range, filter for the entire day
                     queryset = queryset.filter(submitted_at__date=parsed_date)
-
+            elif start_time or end_time:
+                # Only time filtering, across all dates
+                if start_time:
+                    start_hour, start_minute = map(int, start_time.split(':'))
+                    start_time_obj = time(start_hour, start_minute)
+                else:
+                    start_time_obj = time(0, 0)
+                if end_time:
+                    end_hour, end_minute = map(int, end_time.split(':'))
+                    end_time_obj = time(end_hour, end_minute)
+                else:
+                    end_time_obj = time(23, 59)
+                queryset = queryset.filter(
+                    submitted_at__time__gte=start_time_obj,
+                    submitted_at__time__lte=end_time_obj
+                )
         except ValueError as e:
             return Response({
                 'error': str(e),
