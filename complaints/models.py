@@ -65,7 +65,7 @@ class Room(models.Model):
             border=4,
         )
         # Add the URL with encoded data and signature
-        qr_data = f"http://localhost:5173/ComplaintForm?data={self.dataenc}&signature={signature}"
+        qr_data = f"http://localhost:3000/ComplaintForm?data={self.dataenc}&signature={signature}"
         qr.add_data(qr_data)
         qr.make(fit=True)
         

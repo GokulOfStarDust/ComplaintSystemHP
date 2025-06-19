@@ -62,7 +62,7 @@ class ComplaintViewSet(GenericViewSet, ListModelMixin, CreateModelMixin, Retriev
     lookup_field = 'ticket_id'
     pagination_class = CustomLimitOffsetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'priority', 'issue_type', 'ward', 'block']
+    filterset_fields = ['status', 'priority', 'issue_type', 'ward', 'block','assigned_department']
     search_fields = ['ticket_id', 'room_number', 'bed_number', 'description']
     ordering_fields = ['submitted_at', 'priority', 'status']
     ordering = ['-submitted_at']  # default ordering

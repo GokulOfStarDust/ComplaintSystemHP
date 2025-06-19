@@ -29,7 +29,7 @@ QR_CODE_SECRET_KEY = 'YOUR_VERY_STRONG_RANDOM_QR_SECRET_KEY_HERE' # CHANGE THIS 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
