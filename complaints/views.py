@@ -179,7 +179,7 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
         # Get filter parameters
         priority = request.query_params.get('priority')
         department = request.query_params.get('department')
-        status = request.query_params.get('status')
+        status_filter = request.query_params.get('status')  # Renamed to avoid conflict
         submitted_at = request.query_params.get('submitted_at')
 
         # Start with base queryset
@@ -197,8 +197,8 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
         if department:
             queryset = queryset.filter(assigned_department=department)
 
-        if status:
-            queryset = queryset.filter(status=status)
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
 
         if submitted_at:
             queryset = queryset.filter(submitted_at__date=submitted_at)
@@ -217,7 +217,7 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
                 'filters_applied': {
                     'priority': priority,
                     'department': department,
-                    'status': status,
+                    'status': status_filter,
                     'submitted_at': submitted_at
                 }
             }, status=status.HTTP_200_OK)
@@ -225,17 +225,10 @@ class ReportViewSet(GenericViewSet, ListModelMixin):
         # Paginate the results
         page = self.paginate_queryset(stats)
         if page is not None:
-            # The stats are already in the desired dictionary format due to .values() and .annotate()
-            # No need to serialize further. Just return the paginated response.
-            return self.get_paginated_response(list(page)) # Convert to list to ensure it's iterable
+            return self.get_paginated_response(list(page))
 
-        # Fallback for when pagination is not applied (shouldn't happen with pagination_class set)
         return Response(stats)
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        # You can add additional filtering or aggregation here if needed
-        return queryset
     
 class TATViewSet(GenericViewSet, ListModelMixin):
     queryset = Complaint.objects.all()
